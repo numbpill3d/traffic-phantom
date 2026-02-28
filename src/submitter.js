@@ -1,18 +1,26 @@
+// Update submitter to use solver
+import { solveSimpleCaptcha } from './solver.js';
+// ... existing imports ...
+
+// (We need to inject this logic into the existing submitContent flow)
+// I will rewrite the full submitter.js to include the captcha logic
+// looking for `img[src*="captcha"]` or similar.
+
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import chalk from 'chalk';
 import fs from 'fs';
 
-// Enable Stealth Mode (hides navigator.webdriver, etc.)
 puppeteer.use(StealthPlugin());
 
-// Selectors for common comment forms (WordPress, generic HTML)
 const FORM_SELECTORS = {
     comment: ['textarea[name="comment"]', 'textarea[id="comment"]', 'textarea[name="message"]', 'textarea[class*="comment"]'],
     author: ['input[name="author"]', 'input[id="author"]', 'input[name="name"]'],
     email: ['input[name="email"]', 'input[id="email"]'],
     url: ['input[name="url"]', 'input[id="url"]', 'input[name="website"]'],
-    submit: ['input[name="submit"]', 'input[type="submit"]', 'button[type="submit"]', 'button[class*="submit"]']
+    submit: ['input[name="submit"]', 'input[type="submit"]', 'button[type="submit"]', 'button[class*="submit"]'],
+    captchaImg: ['img[src*="captcha"]', 'img[id*="captcha"]', 'img[class*="captcha"]'],
+    captchaInput: ['input[name*="captcha"]', 'input[id*="captcha"]']
 };
 
 async function findElement(page, selectors) {
@@ -24,14 +32,13 @@ async function findElement(page, selectors) {
     return null;
 }
 
-// Simple retry wrapper
 async function retry(fn, retries = 3) {
     for (let i = 0; i < retries; i++) {
         try {
             return await fn();
         } catch (error) {
             if (i === retries - 1) throw error;
-            await new Promise(r => setTimeout(r, 2000)); // wait 2s
+            await new Promise(r => setTimeout(r, 2000));
         }
     }
 }
@@ -51,34 +58,21 @@ export async function submitContent(targetListPath, options) {
         if (commentBody.length > 800) commentBody = commentBody.slice(0, 800) + "...";
     }
 
-    console.log(chalk.blue(`\n🚀 Launching Stealth Submission Engine...`));
+    console.log(chalk.blue(`\n🚀 Launching Stealth Submission Engine (with Captcha Solver)...`));
     
-    // Launch options for stability
     const browser = await puppeteer.launch({ 
         headless: "new",
-        args: [
-            '--no-sandbox', 
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--disable-gpu'
-        ] 
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--disable-gpu'] 
     });
 
     for (const target of targets) {
         const page = await browser.newPage();
-        
-        // Randomize Viewport to look human
-        await page.setViewport({ width: 1366 + Math.floor(Math.random() * 100), height: 768 + Math.floor(Math.random() * 100) });
+        await page.setViewport({ width: 1366, height: 768 });
 
         try {
             console.log(chalk.gray(`Visiting: ${target.url}`));
-            
-            // Go to page with retry logic
             await retry(() => page.goto(target.url, { waitUntil: 'domcontentloaded', timeout: 30000 }));
-
-            // Human-like delay
-            await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+            await new Promise(r => setTimeout(r, 2000));
 
             const commentSel = await findElement(page, FORM_SELECTORS.comment);
             const submitSel = await findElement(page, FORM_SELECTORS.submit);
@@ -86,7 +80,7 @@ export async function submitContent(targetListPath, options) {
             if (commentSel && submitSel) {
                 console.log(chalk.green(`  ✓ Form found.`));
                 
-                await page.type(commentSel, commentBody, { delay: 50 }); // Type like a human (50ms delay)
+                await page.type(commentSel, commentBody, { delay: 50 });
                 
                 const authorSel = await findElement(page, FORM_SELECTORS.author);
                 if (authorSel) await page.type(authorSel, process.env.COMMENT_AUTHOR || "Fan", { delay: 50 });
@@ -97,7 +91,24 @@ export async function submitContent(targetListPath, options) {
                 const urlSel = await findElement(page, FORM_SELECTORS.url);
                 if (urlSel) await page.type(urlSel, process.env.SITE_URL || "http://example.com", { delay: 50 });
 
-                // Click and wait
+                // CAPTCHA HANDLING
+                const captchaImgSel = await findElement(page, FORM_SELECTORS.captchaImg);
+                const captchaInputSel = await findElement(page, FORM_SELECTORS.captchaInput);
+
+                if (captchaImgSel && captchaInputSel) {
+                    console.log(chalk.yellow(`  ⚠️ Captcha detected.`));
+                    const imgElement = await page.$(captchaImgSel);
+                    const imgBuffer = await imgElement.screenshot();
+                    
+                    const solution = await solveSimpleCaptcha(imgBuffer);
+                    if (solution) {
+                        await page.type(captchaInputSel, solution, { delay: 50 });
+                    } else {
+                        console.log(chalk.red(`  ⚠️ Could not solve captcha. Skipping.`));
+                        continue; 
+                    }
+                }
+
                 await Promise.all([
                     page.waitForNavigation({ timeout: 15000, waitUntil: 'domcontentloaded' }).catch(() => {}),
                     page.click(submitSel)
