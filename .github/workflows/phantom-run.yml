@@ -3,7 +3,28 @@ name: Traffic Phantom Autonomous Run
 on:
   schedule:
     - cron: '0 */6 * * *' # Run every 6 hours
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch: # Allow manual trigger with custom inputs
+    inputs:
+      site_name:
+        description: 'Your site/brand name (used as X-Title header for OpenRouter)'
+        required: false
+        default: 'My Awesome Blog'
+        type: string
+      site_url:
+        description: 'Your site URL (used as Referer header + comment URL field)'
+        required: false
+        default: 'https://example.com'
+        type: string
+      comment_author:
+        description: 'Name to post comments under'
+        required: false
+        default: 'Fan'
+        type: string
+      comment_email:
+        description: 'Email to use in comment forms'
+        required: false
+        default: 'fan@example.com'
+        type: string
 
 jobs:
   run-phantom:
@@ -69,8 +90,9 @@ jobs:
     - name: Run Phantom Cycle
       env:
         OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        SITE_NAME: ${{ secrets.SITE_NAME }}
-        SITE_URL: ${{ secrets.SITE_URL }}
-        COMMENT_AUTHOR: ${{ secrets.COMMENT_AUTHOR }}
-        COMMENT_EMAIL: ${{ secrets.COMMENT_EMAIL }}
+        # workflow_dispatch inputs override defaults; scheduled runs use fallbacks
+        SITE_NAME: ${{ github.event.inputs.site_name || secrets.SITE_NAME || 'My Awesome Blog' }}
+        SITE_URL: ${{ github.event.inputs.site_url || secrets.SITE_URL || 'https://example.com' }}
+        COMMENT_AUTHOR: ${{ github.event.inputs.comment_author || secrets.COMMENT_AUTHOR || 'Fan' }}
+        COMMENT_EMAIL: ${{ github.event.inputs.comment_email || secrets.COMMENT_EMAIL || 'fan@example.com' }}
       run: node run-one-cycle.js
