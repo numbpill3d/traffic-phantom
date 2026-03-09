@@ -16,14 +16,25 @@ if (!OPENROUTER_API_KEY) {
     // We don't exit here to allow for dry runs or testing, but it will fail later if called.
 }
 
-const openai = new OpenAI({
-    baseURL: "https://openrouter.ai/api/v1",
-    apiKey: OPENROUTER_API_KEY,
-    defaultHeaders: {
-        "HTTP-Referer": SITE_URL,
-        "X-Title": SITE_NAME,
+// Defer client initialization so the module can load even when the key is missing.
+// The client is created lazily on first use inside generateContent().
+let _openai = null;
+function getOpenAIClient() {
+    if (!_openai) {
+        if (!OPENROUTER_API_KEY) {
+            throw new Error('OPENROUTER_API_KEY (or AI_API_KEY) is not set. Add it to your .env file or repository secrets.');
+        }
+        _openai = new OpenAI({
+            baseURL: "https://openrouter.ai/api/v1",
+            apiKey: OPENROUTER_API_KEY,
+            defaultHeaders: {
+                "HTTP-Referer": SITE_URL,
+                "X-Title": SITE_NAME,
+            }
+        });
     }
-});
+    return _openai;
+}
 
 const SYSTEM_PROMPT = `
 You are an expert SEO Content Writer and Copywriter. 
@@ -66,7 +77,7 @@ export async function generateContent(topic, options) {
     `;
 
     try {
-        const completion = await openai.chat.completions.create({
+        const completion = await getOpenAIClient().chat.completions.create({
             model: model,
             messages: [
                 { role: "system", content: SYSTEM_PROMPT },
